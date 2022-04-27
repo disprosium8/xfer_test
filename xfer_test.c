@@ -97,7 +97,7 @@ struct xfer_config {
   char *host;
   char *fname;
   char *xsp_hop;
-  int port;
+  char *port;
   int use_sdp;
   int interval;
   int time;
@@ -129,32 +129,38 @@ void diep(char *s) {
 }
 
 int socket_client_connect(struct xfer_config *cfg, char *host) {
-  struct sockaddr_in serveraddr;
-  struct hostent *server;
+  struct in6_addr serveraddr;
+  struct addrinfo hints, *res=NULL;
+  int s, rc, slen=sizeof(serveraddr);
 
-  int s, slen=sizeof(serveraddr);
-  int ai_family;
-
-  if (cfg->use_sdp)
-    ai_family = AF_INET_SDP;
-  else
-    ai_family = AF_INET;
-
-  if ((s=socket(ai_family, SOCK_STREAM, 0)) == -1)
-    diep("socket");
-
-  server = gethostbyname(host);
-  if (server == NULL) {
-    fprintf(stderr,"ERROR, no such host as %s\n", host);
-    diep("gethostbyname");
+  memset(&hints, 0x00, sizeof(hints));
+  rc = inet_pton(AF_INET, host, &serveraddr);
+  if (rc == 1) {
+    hints.ai_family = AF_INET;
+    hints.ai_flags |= AI_NUMERICHOST;
+  }
+  else {
+    rc = inet_pton(AF_INET6, host, &serveraddr);
+    if (rc == 1) {
+      hints.ai_family = AF_INET6;
+      hints.ai_flags |= AI_NUMERICHOST;
+    }
   }
 
-  bzero(&serveraddr, sizeof(serveraddr));
-  serveraddr.sin_family = ai_family;
-  bcopy(server->h_addr, &serveraddr.sin_addr.s_addr, server->h_length);
-  serveraddr.sin_port = htons(cfg->port);
+  rc = getaddrinfo(host, cfg->port, &hints, &res);
+  if (rc != 0) {
+    if (rc == EAI_SYSTEM)
+      diep("getaddrinfo() failed");
+    else {
+      printf("Host \"%s\" not found: %s\n", host, gai_strerror(rc));
+      exit(1);
+    }
+  }
 
-  if (connect(s, (struct sockaddr*)&serveraddr, slen) < 0)
+  if ((s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) < 0)
+    diep("socket");
+
+  if (connect(s, res->ai_addr, res->ai_addrlen) < 0)
     diep("connect");
 
   cfg->cntl_sock = s;
@@ -163,21 +169,26 @@ int socket_client_connect(struct xfer_config *cfg, char *host) {
 }
 
 int socket_server_start(struct xfer_config *cfg) {
-  struct sockaddr_in serveraddr;
-  int lfd;
+  struct sockaddr_in6 serveraddr;
+  int lfd, on=1;
   int ai_family;
 
   if (cfg->use_sdp)
     ai_family = AF_INET_SDP;
   else
-    ai_family = AF_INET;
+    ai_family = AF_INET6;
 
   lfd = socket(ai_family, SOCK_STREAM, 0);
+  if (lfd < 0)
+    diep("socket failed");
+
+  if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on)) < 0)
+    diep("setsockopt(SO_REUSEADDR) failed");
 
   bzero(&serveraddr, sizeof(serveraddr));
-  serveraddr.sin_family = ai_family;
-  serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
-  serveraddr.sin_port = htons(cfg->port);
+  serveraddr.sin6_family = ai_family;
+  serveraddr.sin6_addr  = in6addr_any;
+  serveraddr.sin6_port  = htons(atoi(cfg->port));
 
   if (bind(lfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) == -1)
     diep("bind");
@@ -764,7 +775,8 @@ int do_rdma_server(struct xfer_config *cfg) {
   XFER_RDMA_buf_handle *hptr;
 
   struct message msg;
-  struct sockaddr_in cliaddr;
+  struct sockaddr_in6 cliaddr;
+  char str[INET6_ADDRSTRLEN];
   struct timeval start_time, end_time;
   size_t bytes_recv = 0;
   size_t slab_bytes;
@@ -776,7 +788,10 @@ int do_rdma_server(struct xfer_config *cfg) {
   printf("Waiting for RDMA control conn...");
   fflush(stdout);
   cfg->cntl_sock = accept(lfd, (struct sockaddr *)&cliaddr, (socklen_t*)&clilen);
-  printf("[connection from: %s]\n", inet_ntoa(cliaddr.sin_addr));
+  getpeername(cfg->cntl_sock, (struct sockaddr *)&cliaddr, &clilen);
+  if (inet_ntop(AF_INET6, &cliaddr.sin6_addr, str, sizeof(str))) {
+      printf("[connection from: %s:%d]\n", str, ntohs(cliaddr.sin6_port));
+  }
 
   if (xfer_rdma_init(&data)) {
     return -1;
@@ -973,11 +988,12 @@ int do_socket_server(struct xfer_config *cfg) {
   pthread_t wthr;
   struct timeval start_time, end_time;
 
-  struct sockaddr_in cliaddr;
+  struct sockaddr_in6 cliaddr;
   int s, n, lfd, clilen;
 
   size_t bytes_recv;
   size_t slab_bytes;
+  char str[INET6_ADDRSTRLEN];
   char *buf;
 
   lfd = socket_server_start(cfg);
@@ -986,7 +1002,10 @@ int do_socket_server(struct xfer_config *cfg) {
 
   while (1) {
     s = accept(lfd, (struct sockaddr *)&cliaddr, (socklen_t*)&clilen);
-    printf("[connection from: %s]\n", inet_ntoa(cliaddr.sin_addr));
+    getpeername(s, (struct sockaddr *)&cliaddr, &clilen);
+    if (inet_ntop(AF_INET6, &cliaddr.sin6_addr, str, sizeof(str))) {
+        printf("[connection from: %s:%d]\n", str, ntohs(cliaddr.sin6_port));
+    }
 
     gettimeofday(&start_time, NULL);
 
@@ -1103,7 +1122,7 @@ int main(int argc, char **argv) {
     .host = "127.0.0.1",
     .fname = NULL,
     .xsp_hop = NULL,
-    .port = 9930,
+    .port = "9930",
     .use_sdp = 0,
     .bytes = 0,
     .interval = 0,
@@ -1157,7 +1176,7 @@ int main(int argc, char **argv) {
 #endif
       break;
     case 'p':
-      cfg.port = atoi(optarg);
+      cfg.port = optarg;
       break;
     case 'A':
       cfg.affinity = atoi(optarg);
