@@ -232,8 +232,8 @@ char* print_bytes(double b, int bits) {
     sprintf(ret, "%.2f G%c", (double)b/1e9*bb, val);
   else if (b > 1e6)
     sprintf(ret, "%.2f M%c", (double)b/1e6*bb, val);
-  else if (b > 1e3*100)
-    sprintf(ret, "%.2f K%c", (double)b/1e3*100*bb, val);
+  else if (b > 1e3)
+    sprintf(ret, "%.2f K%c", (double)b/1e3*bb, val);
   else
     sprintf(ret, "%d %cytes", (int)b, val);
 
