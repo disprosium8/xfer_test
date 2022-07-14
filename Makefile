@@ -8,10 +8,12 @@ LOADLIBS += -lrt -lm -lpthread
 LDFLAGS +=
 PROGS=xfer_test rdma_bw ib_bench forwarder
 
-all: $(PROGS)
-all: BASIC_FILES += xfer_rdma.c
-all: LOADLIBS += -libverbs -lrdmacm
-all: CFLAGS += -DHAVE_RDMA
+all: xfer_test
+
+rdma: $(PROGS)
+rdma: BASIC_FILES += xfer_rdma.c
+rdma: LOADLIBS += -libverbs -lrdmacm
+rdma: CFLAGS += -DHAVE_RDMA
 
 nordma: xfer_test
 

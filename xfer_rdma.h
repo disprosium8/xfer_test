@@ -3,19 +3,7 @@
 
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
-
-struct message {
-  enum {
-    MSG_READY,
-    MSG_DONE,
-    MSG_STOP,
-    MSG_ACK
-  } type;
-
-  struct ibv_mr mr;
-  uint64_t size;
-  uint64_t buffer_id;
-};
+#include "xfer_test.h"
 
 struct xfer_context {
   struct ibv_context *context;

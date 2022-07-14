@@ -37,6 +37,7 @@
 #endif
 
 #include "slabs_buffer.h"
+#include "xfer_test.h"
 
 #ifndef AF_INET_SDP
 #define AF_INET_SDP 27
