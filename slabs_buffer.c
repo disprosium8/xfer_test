@@ -29,7 +29,7 @@ int __psd_slabs_buf_index(psdSLAB *slab, int side) {
 }
 
 psdSLAB *psd_slabs_buf_create(size_t size, int partitions,
-			      int read_zero) {
+                              int read_zero) {
   psdSLAB *buf;
   int page_size;
   int i;

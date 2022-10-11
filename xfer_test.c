@@ -369,10 +369,10 @@ void *fread_thread(void *arg) {
       diep("read");
     if (n == 0)
       break;
-    
+
     psd_slabs_buf_advance(cfg->slab, n, PSB_WRITE);
     bytes_read += n;
-	  
+
     if (bytes_read == cfg->bytes) {
       psd_slabs_buf_write_swap(cfg->slab, 0);
       break;
@@ -387,7 +387,7 @@ void *fwrite_thread(void *arg) {
   size_t write_bytes;
   char *slab_buf_addr;
   int n;
-  
+
   while (1) {
     slab_bytes = psd_slabs_buf_count_bytes_free(cfg->slab, PSB_READ);
     if (slab_bytes == 0) {
@@ -395,14 +395,14 @@ void *fwrite_thread(void *arg) {
       slab_bytes = psd_slabs_buf_count_bytes_free(cfg->slab, PSB_READ);
 
       if (cfg->use_rdma) {
-	// send ACK
-	struct message msg;
-	msg.type = MSG_ACK;
-	n = send(cfg->cntl_sock, &msg, sizeof(struct message), 0);
-	if (n < 0) {
-	  fprintf(stderr, "RDMA control channel failed\n");
-	  diep("send");
-	}
+        // send ACK
+        struct message msg;
+        msg.type = MSG_ACK;
+        n = send(cfg->cntl_sock, &msg, sizeof(struct message), 0);
+        if (n < 0) {
+          fprintf(stderr, "RDMA control channel failed\n");
+          diep("send");
+        }
       }
     }
 
@@ -410,7 +410,7 @@ void *fwrite_thread(void *arg) {
     if (slab_bytes == 0) {
       break;
     }
-    
+
     // otherwise, determine how much to actually write
     if (slab_bytes < page_size)
       write_bytes = page_size;
@@ -427,7 +427,7 @@ void *fwrite_thread(void *arg) {
     else {
       n = write(cfg->fd, slab_buf_addr, write_bytes);
       if (n < 0)
-	diep("write");
+        diep("write");
     }
     psd_slabs_buf_advance(cfg->slab, slab_bytes, PSB_READ);
   }
@@ -497,7 +497,7 @@ void *rdma_poll_thread(void *arg) {
   XFER_RDMA_poll_info pinfo;
   struct message msg;
   int n, unacked = 0;
-  
+
   while (RUN) {
     xfer_rdma_wait_os_event(cfg->ctx, &pinfo);
 
@@ -514,13 +514,13 @@ void *rdma_poll_thread(void *arg) {
     if (cfg->fname && (++unacked >= psd_slabs_buf_get_pcount(cfg->slab))) {
       n = recv(cfg->cntl_sock, &msg, sizeof(struct message), MSG_WAITALL);
       if (n < 0) {
-	fprintf(stderr, "RDMA control channel failed\n");
-	diep("recv");
+        fprintf(stderr, "RDMA control channel failed\n");
+        diep("recv");
       }
       if (msg.type == MSG_ACK)
-	--unacked;
+        --unacked;
       else
-	diep("unexpected ack");
+        diep("unexpected ack");
     }
 
     if (pinfo.id == 0xdeadbeef)
@@ -544,7 +544,7 @@ void *rdma_write_thread(void *arg) {
 
   clock_gettime(CLOCK_REALTIME, &startup);
   bytes_left = cfg->bytes;
-  
+
   while (RUN) {
     if (cfg->bandwidth == 0.0) {
       bytes_allowed = 0xFFFFFFFFFFFFFFFF;
@@ -564,41 +564,41 @@ void *rdma_write_thread(void *arg) {
 
       // wait for the next available buffer to send when necessary
       if (cfg->fname)
-	psd_slabs_buf_wait_curr(cfg->slab, PSB_READ);
+        psd_slabs_buf_wait_curr(cfg->slab, PSB_READ);
 
       hndl = *(XFER_RDMA_buf_handle*)
-	psd_slabs_buf_get_priv_data(cfg->slab, PSB_CURR);
+             psd_slabs_buf_get_priv_data(cfg->slab, PSB_CURR);
 
       // adjust send amount only for file alignment
       if (cfg->fname) {
-	if (bytes_left > hndl.local_size) {
-	  send_amt = hndl.local_size;
-	  hndl.id = 0xcafebabe;
-	}
-	else {
-	  send_amt = bytes_left;
-	  hndl.id = 0xdeadbeef;
-	}
-	hndl.local_size = send_amt;
+        if (bytes_left > hndl.local_size) {
+          send_amt = hndl.local_size;
+          hndl.id = 0xcafebabe;
+        }
+        else {
+          send_amt = bytes_left;
+          hndl.id = 0xdeadbeef;
+        }
+        hndl.local_size = send_amt;
       }
       else {
-	send_amt = hndl.local_size;
+        send_amt = hndl.local_size;
       }
-      
+
       hptr = &hndl;
       xfer_rdma_post_os_put(&hptr, 1);
-      
+
       psd_slabs_buf_curr_swap(cfg->slab);
-      
+
       bytes_left -= send_amt;
-      
+
       __sync_fetch_and_add(&send_queued, send_amt);
       __sync_fetch_and_add(&total_bytes, send_amt);
       __sync_fetch_and_add(&sent, 1);
 
       // stop cleanly when transfering files
       if (cfg->fname && !bytes_left)
-	break;
+        break;
     }
     else {
       usleep(100);
@@ -694,7 +694,7 @@ int do_rdma_client(struct xfer_config *cfg) {
     fprintf(stderr, "RDMA control channel failed\n");
     diep("recv");
   }
-  
+
   ctx = xfer_rdma_client_connect(&data);
   if (!ctx) {
     fprintf(stderr, "could not get client context\n");
@@ -798,49 +798,49 @@ int do_rdma_server(struct xfer_config *cfg) {
     if (xfer_rdma_init(&data)) {
       return -1;
     }
-    
+
     // sync with the client
     msg.type = MSG_READY;
     n = send(cfg->cntl_sock, &msg, sizeof(struct message), 0);
     if (n <= 0) {
       fprintf(stderr, "RDMA control conn failed\n");
       diep("send");
-    }      
-    
+    }
+
     ctx = xfer_rdma_server_connect(&data);
     if (!ctx) {
       fprintf(stderr, "could not get client context\n");
       return -1;
     }
     cfg->ctx = ctx;
-    
+
     // get remote slab info
     pdata = data.remote_priv;
     cfg->buflen = pdata->buflen;
     cfg->bytes = pdata->fsize;
     cfg->slab_order = pdata->slab_order;
     cfg->slab_parts = pdata->slab_parts;
-    
+
     if (rdma_slab_bufs_reg(cfg))
       return -1;
-    
+
     // exchange pointers
     for (i = 0; i < cfg->slab_parts; i++) {
       hptr = (XFER_RDMA_buf_handle*)
-	psd_slabs_buf_get_priv_data(cfg->slab, PSB_CURR);
+             psd_slabs_buf_get_priv_data(cfg->slab, PSB_CURR);
       xfer_rdma_post_buffer(hptr);
       xfer_rdma_wait_done(hptr);
       psd_slabs_buf_curr_swap(cfg->slab);
     }
-    
+
     printf("Metadata exchange complete\n");
-    
+
     if (cfg->fname) {
       pthread_create(&wthr, NULL, fwrite_thread, (void*)cfg);
     }
-    
+
     gettimeofday(&start_time, NULL);
-    
+
     if (cfg->interval)
       pthread_cond_signal(&report_cond);
 
@@ -848,45 +848,45 @@ int do_rdma_server(struct xfer_config *cfg) {
     while (1) {
       n = recv(cfg->cntl_sock, &msg, sizeof(struct message), MSG_WAITALL);
       if (n <= 0) {
-	fprintf(stderr, "RDMA control conn failed\n");
-	diep("recv");
+        fprintf(stderr, "RDMA control conn failed\n");
+        diep("recv");
       }
-      
+
       if (msg.type == MSG_STOP)
-	break;
-      
+        break;
+
       if (msg.type == MSG_DONE) {
-	n = psd_slabs_buf_get_psize(cfg->slab);
-	if (cfg->bytes && ((n + bytes_recv) > cfg->bytes))
-	  n = (cfg->bytes - bytes_recv);
-	
-	if (cfg->fname) {
-	  psd_slabs_buf_advance(cfg->slab, n, PSB_WRITE);
-	  psd_slabs_buf_write_swap(cfg->slab, 0);
-	}
-	
-	bytes_recv += n;
-	total_bytes = bytes_recv;
+        n = psd_slabs_buf_get_psize(cfg->slab);
+        if (cfg->bytes && ((n + bytes_recv) > cfg->bytes))
+          n = (cfg->bytes - bytes_recv);
+
+        if (cfg->fname) {
+          psd_slabs_buf_advance(cfg->slab, n, PSB_WRITE);
+          psd_slabs_buf_write_swap(cfg->slab, 0);
+        }
+
+        bytes_recv += n;
+        total_bytes = bytes_recv;
       }
     }
-    
+
     if (cfg->fname) {
       // signal file write thread with 0-sized slab to stop
       psd_slabs_buf_write_swap(cfg->slab, 0);
       pthread_join(wthr, NULL);
     }
-    
+
     gettimeofday(&end_time, NULL);
     print_bw(&start_time, &end_time, total_bytes);
-    
+
     rdma_slab_bufs_unreg(cfg);
     xfer_rdma_finalize(&data);
-    
+
     // let the client close first
     n = recv(cfg->cntl_sock, &msg, sizeof(struct message), 0);
     close(cfg->cntl_sock);
   }
-    
+
   return 0;
 }
 #endif
@@ -901,11 +901,11 @@ int do_socket_client(struct xfer_config *cfg) {
   size_t slab_bytes;
   size_t bytes_sent;
   char *buf;
-  
+
   s = socket_client_connect(cfg, cfg->host);
-  
+
   gettimeofday(&start_time, NULL);
-  
+
   if (cfg->fname) {
     struct mdata msg;
     msg.fsize = cfg->bytes;
@@ -913,13 +913,13 @@ int do_socket_client(struct xfer_config *cfg) {
     if (n <= 0) {
       diep("send");
     }
-    
+
     pthread_create(&rthr, NULL, fread_thread, (void*)cfg);
   }
-    
+
   if (cfg->interval)
     pthread_cond_signal(&report_cond);
-  
+
   bytes_sent = 0;
   if (cfg->bytes) {
     while (bytes_sent < cfg->bytes) {
@@ -1008,7 +1008,7 @@ int do_socket_server(struct xfer_config *cfg) {
     s = accept(lfd, (struct sockaddr *)&cliaddr, (socklen_t*)&clilen);
     getpeername(s, (struct sockaddr *)&cliaddr, &clilen);
     if (inet_ntop(AF_INET6, &cliaddr.sin6_addr, str, sizeof(str))) {
-        printf("[connection from: %s:%d]\n", str, ntohs(cliaddr.sin6_port));
+      printf("[connection from: %s:%d]\n", str, ntohs(cliaddr.sin6_port));
     }
 
     gettimeofday(&start_time, NULL);
@@ -1017,12 +1017,12 @@ int do_socket_server(struct xfer_config *cfg) {
       struct mdata msg;
       n = recv(s, &msg, sizeof(struct mdata), MSG_WAITALL);
       if (n < 0) {
-	diep("recv");
+        diep("recv");
       }
       cfg->bytes = msg.fsize;
       pthread_create(&wthr, NULL, fwrite_thread, (void*)cfg);
     }
-    
+
     if (cfg->interval)
       pthread_cond_signal(&report_cond);
 
@@ -1037,13 +1037,13 @@ int do_socket_server(struct xfer_config *cfg) {
 
         buf = psd_slabs_buf_addr(cfg->slab, PSB_WRITE);
 
-	n = recv(s, buf, slab_bytes, 0);
-	if (n < 0) {
-	  perror("recv:");
+        n = recv(s, buf, slab_bytes, 0);
+        if (n < 0) {
+          perror("recv:");
           break;
-	}
+        }
 
-	if (!n) {
+        if (!n) {
           psd_slabs_buf_write_swap(cfg->slab, 0);
           break;
         }
@@ -1117,7 +1117,7 @@ int main(int argc, char **argv) {
     usage(argv[0]);
     exit(-1);
   }
-  
+
   page_size = sysconf(_SC_PAGESIZE);
 
   struct xfer_config cfg  = {
@@ -1204,7 +1204,7 @@ int main(int argc, char **argv) {
       cfg.use_rdma = 1;
       break;
     case 'i':
-     cfg.interval = atoi(optarg);
+      cfg.interval = atoi(optarg);
       break;
     case 't':
       cfg.time = atoi(optarg);
@@ -1270,8 +1270,9 @@ int main(int argc, char **argv) {
       exit(1);
     }
     rc = fcntl(cfg.pipe[0], F_SETPIPE_SZ, splice_size*2);
-  } while (rc >= 0); 
-  
+  }
+  while (rc >= 0);
+
   // determine our buffer size if using order
   if (cfg.slab_order > 0)
     cfg.buflen = (1UL << cfg.slab_order);
@@ -1344,7 +1345,7 @@ int main(int argc, char **argv) {
   // check if we have anything to send/recv at this point
   if (!cfg.server && cfg.fname && !cfg.bytes)
     goto exit;
-  
+
 #ifdef WITH_XSP
   libxspSess *sess;
   libxspSecInfo *sec;
@@ -1406,7 +1407,7 @@ int main(int argc, char **argv) {
       do_socket_server(&cfg);
   }
 
- exit:
+exit:
   if (cfg.fname) {
     close(fd);
   }
