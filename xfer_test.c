@@ -786,104 +786,107 @@ int do_rdma_server(struct xfer_config *cfg) {
 
   lfd = socket_server_start(cfg);
 
-  printf("Waiting for RDMA control conn...");
-  fflush(stdout);
-  cfg->cntl_sock = accept(lfd, (struct sockaddr *)&cliaddr, (socklen_t*)&clilen);
-  getpeername(cfg->cntl_sock, (struct sockaddr *)&cliaddr, &clilen);
-  if (inet_ntop(AF_INET6, &cliaddr.sin6_addr, str, sizeof(str))) {
-      printf("[connection from: %s:%d]\n", str, ntohs(cliaddr.sin6_port));
-  }
-
-  if (xfer_rdma_init(&data)) {
-    return -1;
-  }
-
-  // sync with the client
-  msg.type = MSG_READY;
-  n = send(cfg->cntl_sock, &msg, sizeof(struct message), 0);
-  if (n <= 0) {
-    fprintf(stderr, "RDMA control conn failed\n");
-    diep("send");
-  }      
-  
-  ctx = xfer_rdma_server_connect(&data);
-  if (!ctx) {
-    fprintf(stderr, "could not get client context\n");
-    return -1;
-  }
-  cfg->ctx = ctx;
-
-  // get remote slab info
-  pdata = data.remote_priv;
-  cfg->buflen = pdata->buflen;
-  cfg->bytes = pdata->fsize;
-  cfg->slab_order = pdata->slab_order;
-  cfg->slab_parts = pdata->slab_parts;
-  
-  if (rdma_slab_bufs_reg(cfg))
-    return -1;
-
-  // exchange pointers
-  for (i = 0; i < cfg->slab_parts; i++) {
-    hptr = (XFER_RDMA_buf_handle*)
-           psd_slabs_buf_get_priv_data(cfg->slab, PSB_CURR);
-    xfer_rdma_post_buffer(hptr);
-    xfer_rdma_wait_done(hptr);
-    psd_slabs_buf_curr_swap(cfg->slab);
-  }
-  
-  printf("Metadata exchange complete\n");
-
-  if (cfg->fname) {
-    pthread_create(&wthr, NULL, fwrite_thread, (void*)cfg);
-  }
-
-  gettimeofday(&start_time, NULL);
-
-  if (cfg->interval)
-    pthread_cond_signal(&report_cond);
-
   while (1) {
-    n = recv(cfg->cntl_sock, &msg, sizeof(struct message), MSG_WAITALL);
+    printf("Waiting for RDMA control conn...");
+    fflush(stdout);
+    cfg->cntl_sock = accept(lfd, (struct sockaddr *)&cliaddr, (socklen_t*)&clilen);
+    getpeername(cfg->cntl_sock, (struct sockaddr *)&cliaddr, &clilen);
+    if (inet_ntop(AF_INET6, &cliaddr.sin6_addr, str, sizeof(str))) {
+      printf("[connection from: %s:%d]\n", str, ntohs(cliaddr.sin6_port));
+    }
+
+    if (xfer_rdma_init(&data)) {
+      return -1;
+    }
+    
+    // sync with the client
+    msg.type = MSG_READY;
+    n = send(cfg->cntl_sock, &msg, sizeof(struct message), 0);
     if (n <= 0) {
       fprintf(stderr, "RDMA control conn failed\n");
-      diep("recv");
+      diep("send");
+    }      
+    
+    ctx = xfer_rdma_server_connect(&data);
+    if (!ctx) {
+      fprintf(stderr, "could not get client context\n");
+      return -1;
     }
+    cfg->ctx = ctx;
+    
+    // get remote slab info
+    pdata = data.remote_priv;
+    cfg->buflen = pdata->buflen;
+    cfg->bytes = pdata->fsize;
+    cfg->slab_order = pdata->slab_order;
+    cfg->slab_parts = pdata->slab_parts;
+    
+    if (rdma_slab_bufs_reg(cfg))
+      return -1;
+    
+    // exchange pointers
+    for (i = 0; i < cfg->slab_parts; i++) {
+      hptr = (XFER_RDMA_buf_handle*)
+	psd_slabs_buf_get_priv_data(cfg->slab, PSB_CURR);
+      xfer_rdma_post_buffer(hptr);
+      xfer_rdma_wait_done(hptr);
+      psd_slabs_buf_curr_swap(cfg->slab);
+    }
+    
+    printf("Metadata exchange complete\n");
+    
+    if (cfg->fname) {
+      pthread_create(&wthr, NULL, fwrite_thread, (void*)cfg);
+    }
+    
+    gettimeofday(&start_time, NULL);
+    
+    if (cfg->interval)
+      pthread_cond_signal(&report_cond);
 
-    if (msg.type == MSG_STOP)
-      break;
-
-    if (msg.type == MSG_DONE) {
-      n = psd_slabs_buf_get_psize(cfg->slab);
-      if (cfg->bytes && ((n + bytes_recv) > cfg->bytes))
-	n = (cfg->bytes - bytes_recv);
-
-      if (cfg->fname) {
-	psd_slabs_buf_advance(cfg->slab, n, PSB_WRITE);
-	psd_slabs_buf_write_swap(cfg->slab, 0);
+    bytes_recv = 0;
+    while (1) {
+      n = recv(cfg->cntl_sock, &msg, sizeof(struct message), MSG_WAITALL);
+      if (n <= 0) {
+	fprintf(stderr, "RDMA control conn failed\n");
+	diep("recv");
       }
       
-      bytes_recv += n;
-      total_bytes = bytes_recv;
+      if (msg.type == MSG_STOP)
+	break;
+      
+      if (msg.type == MSG_DONE) {
+	n = psd_slabs_buf_get_psize(cfg->slab);
+	if (cfg->bytes && ((n + bytes_recv) > cfg->bytes))
+	  n = (cfg->bytes - bytes_recv);
+	
+	if (cfg->fname) {
+	  psd_slabs_buf_advance(cfg->slab, n, PSB_WRITE);
+	  psd_slabs_buf_write_swap(cfg->slab, 0);
+	}
+	
+	bytes_recv += n;
+	total_bytes = bytes_recv;
+      }
     }
+    
+    if (cfg->fname) {
+      // signal file write thread with 0-sized slab to stop
+      psd_slabs_buf_write_swap(cfg->slab, 0);
+      pthread_join(wthr, NULL);
+    }
+    
+    gettimeofday(&end_time, NULL);
+    print_bw(&start_time, &end_time, total_bytes);
+    
+    rdma_slab_bufs_unreg(cfg);
+    xfer_rdma_finalize(&data);
+    
+    // let the client close first
+    n = recv(cfg->cntl_sock, &msg, sizeof(struct message), 0);
+    close(cfg->cntl_sock);
   }
-
-  // signal file write thread with 0-sized slab to stop
-  psd_slabs_buf_write_swap(cfg->slab, 0);
-  if (cfg->fname) {
-    pthread_join(wthr, NULL);
-  }
-  
-  gettimeofday(&end_time, NULL);
-  print_bw(&start_time, &end_time, total_bytes);
-
-  rdma_slab_bufs_unreg(cfg);
-  xfer_rdma_finalize(&data);
-
-  // let the client close first
-  n = recv(cfg->cntl_sock, &msg, sizeof(struct message), 0);
-  close(cfg->cntl_sock);
-
+    
   return 0;
 }
 #endif
